@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <zlib.h>
+#include <netdb.h>
 
 #include "urldata.h"
 #include "multihandle.h"
@@ -30,6 +31,9 @@ static struct curl_maa_config maa_conf = {
   .log_max_record = 100,
   .log_per_report = 10,
 };
+
+/* cname to compare */
+static char maa_cname[256];
 
 static const char* http_method_str[HTTPREQ_LAST] = {
   "NONE",  /* HTTPREQ_NONE */
@@ -270,7 +274,7 @@ static void* maa_thread_handler(void *ctx)
   int line_num = 0;/* number of reported log lines */
   FILE* fp = fopen(maa_conf.log_path, "r");
   if (fp == NULL) {
-    return NULL;
+    pthread_exit(NULL);
   }
 
   while(1) {
@@ -278,7 +282,7 @@ static void* maa_thread_handler(void *ctx)
         line_num >= maa_conf.log_max_record ||
         access(maa_conf.log_path, F_OK) != 0) {
       fclose(fp);
-      return NULL;
+      pthread_exit(NULL);
     }
 
     /* check per second and report at least "log_per_report" pieces */
@@ -289,6 +293,23 @@ static void* maa_thread_handler(void *ctx)
 
     sleep(1);
   }
+
+  pthread_exit(NULL);
+}
+
+static void* maa_cname_update_thread_handler(void *ctx)
+{
+  struct hostent *host;
+
+  if ((host = gethostbyname(MAA_H2_HOST_4CNAME)) == NULL) {
+    pthread_exit(NULL);
+  }
+
+  if (strlen(host->h_name) < sizeof(maa_cname)) {
+    strncpy(maa_cname, host->h_name, strlen(host->h_name));
+  }
+
+  pthread_exit(NULL);
 }
 
 CURLcode curl_maa_global_init(struct curl_maa_config *conf)
@@ -300,6 +321,15 @@ CURLcode curl_maa_global_init(struct curl_maa_config *conf)
   if (conf == NULL || conf->log_path[0] == '\0') {
     return CURLE_FAILED_INIT;
   }
+
+  bzero(maa_cname, sizeof(maa_cname));
+
+  pthread_t ign_thd;
+  /* init maa cname update thread */
+  if (pthread_create(&ign_thd, NULL, maa_cname_update_thread_handler, NULL) < 0) {
+    return CURLE_FAILED_INIT;
+  }
+  pthread_detach(ign_thd);
 
   /* init data */
   bzero(&maa_handle, sizeof(struct curl_maa_handle));
@@ -378,7 +408,8 @@ void Curl_maa_check_connection_type(struct connectdata* conn)
   }
 
   const char* cname = conn->dns_entry->addr->ai_canonname;
-  if (cname == NULL || strstr(cname, MAA_H2_DOMAIN_CNAME) == NULL) {
+  if (cname == NULL || strlen(maa_cname) == 0
+      || strstr(cname, maa_cname) == NULL) {
     conn->maa.maa_type = CURL_MAATYPE_H1_CNAME;
     goto type_exit;
   }

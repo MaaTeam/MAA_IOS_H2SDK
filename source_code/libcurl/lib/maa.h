@@ -3,8 +3,8 @@
 
 #include <sys/time.h>
 
-#define MAA_H2_SDK_VERSION   "1.1.0"
-#define MAA_H2_DOMAIN_CNAME  "maa.glb0.lxdns.com"
+#define MAA_H2_SDK_VERSION   "1.2.0"
+#define MAA_H2_HOST_4CNAME   "wsngh2.chinanetcenter.com"
 #define MAA_H2_POST_URL      "http://collect.dsp.chinanetcenter.com/file"
 #define MAA_H2_TCP_PORT      6480
 #define MAA_H2_TLS_PORT      6443
