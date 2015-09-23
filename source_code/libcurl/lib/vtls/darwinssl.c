@@ -31,6 +31,7 @@
 #include "urldata.h" /* for the SessionHandle definition */
 #include "curl_base64.h"
 #include "strtok.h"
+#include "maa.h"
 
 #ifdef USE_DARWINSSL
 
@@ -1341,8 +1342,13 @@ static CURLcode darwinssl_connect_step1(struct connectdata *conn,
    * Both hostname check and SNI require SSLSetPeerDomainName().
    * Also: the verifyhost setting influences SNI usage */
   if(data->set.ssl.verifyhost) {
-    err = SSLSetPeerDomainName(connssl->ssl_ctx, conn->host.name,
-    strlen(conn->host.name));
+    if (data->maa.https_switch) {
+      err = SSLSetPeerDomainName(connssl->ssl_ctx, MAA_H2_HOST_4CNAME,
+        strlen(MAA_H2_HOST_4CNAME));
+    } else {
+      err = SSLSetPeerDomainName(connssl->ssl_ctx, conn->host.name,
+        strlen(conn->host.name));
+    }
 
     if(err != noErr) {
       infof(data, "WARNING: SSL: SSLSetPeerDomainName() failed: OSStatus %d\n",

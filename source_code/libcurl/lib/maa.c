@@ -34,6 +34,7 @@ static struct curl_maa_config maa_conf = {
 
 /* cname to compare */
 static char maa_cname[256];
+static pthread_mutex_t maa_cname_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static const char* http_method_str[HTTPREQ_LAST] = {
   "NONE",  /* HTTPREQ_NONE */
@@ -305,8 +306,11 @@ static void* maa_cname_update_thread_handler(void *ctx)
     pthread_exit(NULL);
   }
 
-  if (strlen(host->h_name) < sizeof(maa_cname)) {
-    strncpy(maa_cname, host->h_name, strlen(host->h_name));
+  const char *p = strchr(host->h_name, '.');
+  if (p != NULL && strlen(p) < sizeof(maa_cname)) {
+    pthread_mutex_lock(&maa_cname_mutex);
+    strncpy(maa_cname, p, strlen(p));
+    pthread_mutex_unlock(&maa_cname_mutex);
   }
 
   pthread_exit(NULL);
@@ -391,6 +395,7 @@ void Curl_maa_check_connection_type(struct connectdata* conn)
   conn->maa.maa_port = 0;
   conn->maa.maa_type = CURL_MAATYPE_NOHTTP;
   conn->maa.https_switch = false;
+  memset(conn->maa.cname, 0, sizeof(conn->maa.cname));
 
   if (conn == NULL || data == NULL || conn->handler == NULL
       || conn->dns_entry == NULL || conn->dns_entry->addr == NULL
@@ -402,29 +407,34 @@ void Curl_maa_check_connection_type(struct connectdata* conn)
     return;
   }
 
+  const char* cname = conn->dns_entry->addr->ai_canonname;
+  if (cname != NULL && strlen(cname) < sizeof(conn->maa.cname)) {
+    strncpy(conn->maa.cname, cname, strlen(cname));
+  }
+
   if (conn->proxy.name != NULL && conn->proxy.name[0] != '\0') {
     conn->maa.maa_type = CURL_MAATYPE_H1_PROXY;
     goto type_exit;
   }
 
-  const char* cname = conn->dns_entry->addr->ai_canonname;
+  pthread_mutex_lock(&maa_cname_mutex);
   if (cname == NULL || strlen(maa_cname) == 0
       || strstr(cname, maa_cname) == NULL) {
     conn->maa.maa_type = CURL_MAATYPE_H1_CNAME;
+    pthread_mutex_unlock(&maa_cname_mutex);
     goto type_exit;
   }
+  pthread_mutex_unlock(&maa_cname_mutex);
 
   conn->maa.maa_type = CURL_MAATYPE_H2;
-  strncpy(conn->maa.cname,
-          conn->dns_entry->addr->ai_canonname,
-          sizeof(conn->maa.cname));
-
   data->set.httpversion = CURL_HTTP_VERSION_2_0;
 
   if ((conn->handler->protocol & CURLPROTO_HTTP)
       && data->maa_https_switch) {
     conn->handler = conn->given = &Curl_handler_https;
     conn->maa.https_switch = true;
+    data->set.ssl.verifypeer = true;
+    data->set.ssl.verifyhost = true;
   }
 
   if (conn->handler->protocol & CURLPROTO_HTTP) {
